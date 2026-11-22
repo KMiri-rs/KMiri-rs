@@ -6,6 +6,7 @@ use rustc_public::{local_crate, mir::mono::MonoItem, rustc_internal::internal};
 use std::{ops::ControlFlow, path::Path};
 
 extern crate indexmap;
+extern crate rustc_attr_ir;
 extern crate rustc_data_structures;
 extern crate rustc_driver;
 extern crate rustc_hir;
