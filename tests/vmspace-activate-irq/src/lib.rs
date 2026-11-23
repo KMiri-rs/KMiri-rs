@@ -11,12 +11,12 @@
 //!
 //! Expected: Undefined Behavior in `VmSpace::activate`. With the injection
 //! config here it is a use-after-free of a `VmSpace` `Arc`. Other injection
-//! points expose the same double release differently: a Stacked Borrows
-//! protector error when the callback reads a `VmSpace` that the interrupted
-//! `activate` is dropping, or OSTD's own reference-count assertion on the
-//! freed space's root page-table frame (a kernel panic, not a Miri report).
-//! The check accepts a use-after-free or a Stacked Borrows protector report
-//! inside `VmSpace::activate`.
+//! points expose the same double release differently: a protector error when
+//! the callback activates a `VmSpace` that the interrupted `activate` is
+//! dropping, or OSTD's own reference-count assertion on the freed space's
+//! root page-table frame (a kernel panic, not a Miri report). The check
+//! accepts a use-after-free, or a protector report while a `VmSpace` is being
+//! dropped, inside `VmSpace::activate`.
 #![no_std]
 #![deny(unsafe_code)]
 #![feature(format_args_nl)]
