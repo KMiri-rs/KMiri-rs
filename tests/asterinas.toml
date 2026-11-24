@@ -1,5 +1,5 @@
 page_table = true
-total_mem_size = 0x800_0000
+total_mem_size = 0x400_0000
 
 [irq]
 enabled = true
