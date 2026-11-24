@@ -1,0 +1,10 @@
+[package]
+name = "segment-wrapped-size"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies.ostd]
+path = "../../asterinas/ostd"
+
+[profile.dev]
+overflow-checks = false
