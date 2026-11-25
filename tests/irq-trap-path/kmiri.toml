@@ -1,0 +1,10 @@
+page_table = true
+total_mem_size = 0x400_0000
+
+[irq]
+enabled = true
+tick_interval_basic_blocks = 2000
+inject_at_basic_blocks = []
+random_injection_rate = 0.0
+random_seed = 0
+trace = false
