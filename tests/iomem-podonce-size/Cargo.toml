@@ -1,0 +1,15 @@
+[package]
+name = "iomem-podonce-size"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies.ostd]
+path = "../../asterinas/ostd"
+
+[dependencies.zerocopy]
+version = "0.8.34"
+features = ["derive"]
+
+[workspace]
+exclude = ["target/osdk/base", "target/osdk/test-base"]
+project_type = "kernel"
