@@ -13,7 +13,10 @@ order the runner listed them (`KTEST_LIST` lines).
 Results go to OUT_DIR/ledger.tsv (name, status, run, detail), with status one of
 ok, FAILED (the test panicked), ABORT (the kernel died in the test) and TIMEOUT.
 Each kernel's output is OUT_DIR/runNNN.log. The environment (PATH with
-cargo-osdk, MIRIFLAGS, OSDK_LOCAL_DEV, ...) is passed through unchanged.
+cargo-osdk, MIRIFLAGS, OSDK_LOCAL_DEV, ...) is passed through, except that if
+CRATE_DIR has a `kmiri.toml`, `-Zkmiri-toml=` with it is appended to MIRIFLAGS
+(the last `-Zkmiri-toml` wins), for crates whose tests need their own machine
+configuration.
 """
 import os, re, signal, subprocess, sys, time
 
@@ -27,8 +30,12 @@ def run(crate_dir, out_dir, names, idx):
     """Runs one kernel. Returns (log path, 'done' or 'stuck', exit code)."""
     log = os.path.join(out_dir, f"run{idx:03d}.log")
     with open(log, "wb") as f:
+        env = dict(os.environ)
+        toml = os.path.join(os.path.abspath(crate_dir), "kmiri.toml")
+        if os.path.exists(toml):
+            env["MIRIFLAGS"] = f"{env.get('MIRIFLAGS', '')} -Zkmiri-toml={toml}".strip()
         p = subprocess.Popen(["cargo", "osdk", "miri"] + names, cwd=crate_dir, stdout=f,
-                             stderr=subprocess.STDOUT, start_new_session=True)
+                             stderr=subprocess.STDOUT, start_new_session=True, env=env)
         last, last_t, state = None, time.time(), "done"
         while p.poll() is None:
             time.sleep(3)
