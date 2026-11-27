@@ -1,0 +1,59 @@
+# KMiri machine for the BlueOS kmiri board (riscv64, M mode, no MMU).
+# Addresses follow qemu_riscv64: DRAM at 0x8000_0000, 128 MiB.
+page_table = false
+# RAM the kernel sees ends at 0x8800_0000 (board PHYS_DRAM_*). The interpreter
+# places its own non-static, non-stack allocations top-down from
+# total_mem_size, so the extra 128 MiB keeps them out of the kernel's DRAM.
+total_mem_size = 0x90000000
+stack_mem_size = 0x100000
+
+# Linker-script symbols, with the values of the native qemu_riscv64 debug
+# kernel_unittest image (llvm-nm, upstream 300b6c646). Exception: BSS is
+# empty, because the interpreter already gives every static its initial value
+# and the image itself is not in DRAM.
+[layout]
+__bss_start = 0x8033b170
+__bss_end = 0x8033b170
+__heap_start = 0x80343000
+__heap_end = 0x80b43000
+__sys_stack_start = 0x80b43000
+__sys_stack_end = 0x80bc3000
+_end = 0x80bc3000
+
+# Interrupt enable state is modelled; no interrupt is delivered yet.
+[irq]
+enabled = true
+# Harts leave reset with interrupts masked (mstatus.MIE = 0).
+enabled_at_start = false
+
+# DRAM after the image is the pool of the kernel allocator: the buddy
+# allocator puts its page descriptors at `_end` and manages the pages up to the
+# end of DRAM. The kernel announces each block it hands out
+# (kernel/kernel/src/allocator/notify.rs).
+[[pool]]
+name = "Dram"
+base_addr = 0x80bc3000
+size = 0x743d000
+
+# NS16550 console: the memory keeps references to the register block valid;
+# volatile accesses to the registers go to the 16550 model.
+[[kalloc]]
+name = "Uart0"
+base_addr = 0x10000000
+size = 0x100
+align = 0x100
+
+[[uart16550]]
+base_addr = 0x10000000
+
+# Section tables the linker script bounds with start/end symbols. The
+# interpreter lays out every static placed in the section as one array.
+[[link_section]]
+name = ".init_array"
+start = "__init_array_start"
+end = "__init_array_end"
+
+[[link_section]]
+name = ".bk_app_array"
+start = "__bk_app_array_start"
+end = "__bk_app_array_end"
