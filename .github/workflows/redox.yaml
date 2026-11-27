@@ -2,7 +2,7 @@ name: Redox
 
 on:
   workflow_dispatch:
-  push:
+  # push:
 
 env:
   # Pass Redox/kmiri.toml to kmiri.
