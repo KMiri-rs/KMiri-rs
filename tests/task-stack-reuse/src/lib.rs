@@ -45,22 +45,22 @@ fn kernel_main() {
 
     let _task1 = TaskOptions::new(|| {
         let (task_first, task_last) = run_loop("spawned_task_1");
-        TASK1_DONE.store(true, SeqCst);
         assert_eq!(
             task_first, task_last,
             "spawned_task_1 stack address drifted: {task_first:#x} -> {task_last:#x}"
         );
+        TASK1_DONE.store(true, SeqCst);
     })
     .spawn()
     .unwrap();
 
     let _task2 = TaskOptions::new(|| {
         let (task_first, task_last) = run_loop("spawned_task_2");
-        TASK2_DONE.store(true, SeqCst);
         assert_eq!(
             task_first, task_last,
             "spawned_task_2 stack address drifted: {task_first:#x} -> {task_last:#x}"
         );
+        TASK2_DONE.store(true, SeqCst);
     })
     .spawn()
     .unwrap();
