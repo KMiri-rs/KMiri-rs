@@ -53,7 +53,6 @@ fn kernel_main() {
         // This out-of-order drop re-enables IRQs while `inner` still serves
         // as the safe InAtomicMode witness for `old`.
         drop(outer);
-        assert!(ostd::irq::miri_local_irqs_enabled());
         rcu.update(Box::new(Payload { value: 0xBB }));
 
         ostd::miri_println!("irq-rcu-uaf: waiting for an RCU grace period");

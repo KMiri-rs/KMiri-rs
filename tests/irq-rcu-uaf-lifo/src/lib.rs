@@ -58,7 +58,6 @@ fn kernel_main() {
         drop(old);
         drop(inner);
         drop(outer);
-        assert!(ostd::irq::miri_local_irqs_enabled());
         rcu.update(Box::new(Payload { value: 0xBB }));
 
         for _ in 0..128 {

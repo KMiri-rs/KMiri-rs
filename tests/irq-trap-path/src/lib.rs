@@ -35,10 +35,13 @@ fn kernel_main() {
         TICKS.fetch_add(1, Ordering::SeqCst);
     });
 
-    // IRQs are enabled here, so KMiri delivers the raised timer IRQ at the
-    // next basic-block boundary, before the loads below.
-    assert!(ostd::irq::miri_local_irqs_enabled());
-    ostd::timer::miri_test_raise_timer_irq();
+    // Wait for a config-injected timer IRQ (`tick_interval_basic_blocks` in kmiri.toml).
+    for _ in 0..10_000 {
+        if TICKS.load(Ordering::SeqCst) >= 1 {
+            break;
+        }
+        core::hint::spin_loop();
+    }
 
     let ticks = TICKS.load(Ordering::SeqCst);
     let bottom_half_runs = BOTTOM_HALF_RUNS.load(Ordering::SeqCst);
@@ -47,10 +50,10 @@ fn kernel_main() {
         ticks,
         bottom_half_runs
     );
-    assert_eq!(ticks, 1, "the raised timer IRQ was not delivered");
-    assert_eq!(
-        bottom_half_runs, 1,
-        "the timer IRQ bypassed trap_handler: the bottom half never ran"
+    assert!(ticks >= 1, "the config-injected timer IRQ was not delivered");
+    assert!(
+        bottom_half_runs >= ticks,
+        "the timer IRQ bypassed trap_handler: the bottom half did not run for every tick"
     );
     ostd::miri_println!("irq-trap-path: native trap path verified");
 }
