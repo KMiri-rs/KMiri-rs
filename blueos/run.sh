@@ -74,7 +74,8 @@ run_test() {
     done
     wait $pid || rc=${rc:-$?}
     sleep 1
-    ub=$(grep -c '^error: Undefined Behavior' "$log" || true)
+    # Diagnostics are colored (the build passes --color=always).
+    ub=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -c '^error: Undefined Behavior' || true)
     echo "== passed: $(grep -c '^\[       OK \]' "$log"), undefined behavior reported: $ub, end: ${rc:-0}"
     rm -f "$log"
     [ "$ub" = 0 ]
