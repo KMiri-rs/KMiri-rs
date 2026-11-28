@@ -20,7 +20,7 @@ __sys_stack_start = 0x80b43000
 __sys_stack_end = 0x80bc3000
 _end = 0x80bc3000
 
-# Interrupt enable state is modelled; no interrupt is delivered yet.
+# Interrupts come from the CLINT below.
 [irq]
 enabled = true
 # Harts leave reset with interrupts masked (mstatus.MIE = 0).
@@ -57,3 +57,15 @@ end = "__init_array_end"
 name = ".bk_app_array"
 start = "__bk_app_array_start"
 end = "__bk_app_array_end"
+
+# CLINT (qemu_riscv64 layout): msip, mtimecmp and mtime of the native clock
+# and IPI drivers. The memory keeps references to the register block valid;
+# volatile accesses to the registers go to the CLINT model.
+[[kalloc]]
+name = "Clint"
+base_addr = 0x2000000
+size = 0x10000
+align = 0x10000
+
+[clint]
+base_addr = 0x2000000

@@ -36,13 +36,15 @@ cd blueos
 ./run.sh test    # prints the test log, then a summary line
 ```
 
-Expected now: 112 tests pass and no undefined behavior is reported; the run
-then stops at `test_event_flags_wait_all`, the first test that waits for a
-timeout, because clock interrupts are not delivered yet.
+Expected now: 169 tests pass and no undefined behavior is reported; the run
+then stops at `stress_trap`, whose `ecall` in inline assembly KMiri cannot
+interpret, so the tests after it are not reached.
 
 ## Differences from native `qemu_riscv64`
 
-Listed in the description of the board
-([KMiri-rs/vivoblueos-kernel#25](https://github.com/KMiri-rs/vivoblueos-kernel/pull/25)):
-one core instead of SMP, no interrupts delivered, a stand-in clock.
+Listed in the descriptions of the board
+([KMiri-rs/vivoblueos-kernel#25](https://github.com/KMiri-rs/vivoblueos-kernel/pull/25),
+[#26](https://github.com/KMiri-rs/vivoblueos-kernel/pull/26)): one core
+instead of SMP; clock and software interrupts come from KMiri's CLINT model,
+which has no `mie` register and resets `mtimecmp` to the maximum.
 Stacked Borrows is off by default (`KMIRI_FLAGS`).
