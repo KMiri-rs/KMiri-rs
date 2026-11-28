@@ -69,3 +69,8 @@ align = 0x10000
 
 [clint]
 base_addr = 0x2000000
+
+# Two harts, as CONFIG_NUM_CORES in the kmiri defconfig (native qemu_riscv64:
+# 32); see the board for how they start.
+[smp]
+num_cpus = 2
