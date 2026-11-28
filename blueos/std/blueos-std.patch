@@ -1,0 +1,747 @@
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/Cargo.lock b/Cargo.lock
+--- a/Cargo.lock	2026-11-22 06:04:22.070824915 +0000
++++ b/Cargo.lock	2026-11-26 15:05:29.573782440 +0000
+@@ -152,15 +152,6 @@
+ ]
+ 
+ [[package]]
+-name = "libc"
+-version = "0.2.191"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
+-dependencies = [
+- "rustc-std-workspace-core",
+-]
+-
+-[[package]]
+ name = "memchr"
+ version = "2.8.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml	2026-11-22 06:04:22.071824916 +0000
++++ b/Cargo.toml	2026-11-26 15:03:56.602443683 +0000
+@@ -85,6 +85,9 @@
+ rustc-std-workspace-core = { path = 'rustc-std-workspace-core' }
+ rustc-std-workspace-alloc = { path = 'rustc-std-workspace-alloc' }
+ rustc-std-workspace-std = { path = 'rustc-std-workspace-std' }
++# BlueOS forks: add custom target support (BlueOS libc and cc-rs patches).
++# These must be kept in sync with each other and with the target specs.
++libc = { path = "@BLUEOS_LIBC@" }
+ 
+ # See comments in `library/windows-sys/Cargo.toml` for why this is patched
+ windows-sys = { path = 'windows-sys' }
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/core/src/ffi/primitives.rs b/core/src/ffi/primitives.rs
+--- a/core/src/ffi/primitives.rs	2026-11-22 06:04:22.289825170 +0000
++++ b/core/src/ffi/primitives.rs	2026-11-26 15:02:51.896380083 +0000
+@@ -108,10 +108,14 @@
+         //   architecture defaults). As we only have a target for userspace apps so there are no
+         //   special cases for L4Re below.
+         //   https://github.com/rust-lang/rust/pull/132975#issuecomment-2484645240
++        //
++        // BlueOS:
++        //   BlueOS compiles C code with `-fsigned-char`, so c_char is i8.
+         all(
+             not(windows),
+             not(target_vendor = "apple"),
+             not(target_os = "vita"),
++            not(target_os = "blueos"),
+             any(
+                 target_arch = "aarch64",
+                 target_arch = "arm",
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/core/src/intrinsics/mod.rs b/core/src/intrinsics/mod.rs
+--- a/core/src/intrinsics/mod.rs	2026-11-22 06:04:22.177825039 +0000
++++ b/core/src/intrinsics/mod.rs	2026-11-27 02:50:49.935366200 +0000
+@@ -633,6 +633,13 @@
+ #[rustc_intrinsic]
+ pub const fn abort_immediate() -> !;
+ 
++/// The former name of [`abort_immediate`], kept for sources built with
++/// toolchains that still use it.
++#[inline(always)]
++pub fn abort() -> ! {
++    abort_immediate()
++}
++
+ /// Informs the optimizer that this point in the code is not reachable,
+ /// enabling further optimizations.
+ ///
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/Cargo.toml b/std/Cargo.toml
+--- a/std/Cargo.toml	2026-11-22 06:04:22.070824915 +0000
++++ b/std/Cargo.toml	2026-11-26 15:03:56.836481998 +0000
+@@ -33,7 +33,7 @@
+ addr2line = { version = "0.27.0", optional = true, default-features = false }
+ 
+ [target.'cfg(not(all(windows, target_env = "msvc")))'.dependencies]
+-libc = { version = "0.2.191", default-features = false, features = [
++libc = { version = "0.2.183", default-features = false, features = [
+     'rustc-dep-of-std',
+ ], public = true }
+ 
+@@ -168,6 +168,8 @@
+     'cfg(target_has_reliable_f128_math)',
+     # Controlling which tests we run in Miri.
+     'cfg(skip_unsupported_miri_tests)',
++    # #[cfg(bootstrap)] rtems
++    'cfg(target_os, values("rtems", "blueos"))',
+ ]
+ 
+ [lints.cargo]
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/build.rs b/std/build.rs
+--- a/std/build.rs	2026-11-22 06:04:22.155825014 +0000
++++ b/std/build.rs	2026-11-26 15:02:52.403470595 +0000
+@@ -58,6 +58,7 @@
+         || target_os == "nuttx"
+         || target_os == "cygwin"
+         || target_os == "vexos"
++        || target_os == "blueos"
+ 
+         // See src/bootstrap/src/core/build_steps/synthetic_targets.rs
+         || env::var("RUSTC_BOOTSTRAP_SYNTHETIC_TARGET").is_ok()
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/os/blueos/fs.rs b/std/src/os/blueos/fs.rs
+--- a/std/src/os/blueos/fs.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/std/src/os/blueos/fs.rs	2026-11-26 14:57:35.000000000 +0000
+@@ -0,0 +1,95 @@
++#![stable(feature = "metadata_ext", since = "1.1.0")]
++
++use crate::fs::Metadata;
++use crate::sys::AsInner;
++
++/// OS-specific extensions to [`fs::Metadata`].
++///
++/// [`fs::Metadata`]: crate::fs::Metadata
++#[stable(feature = "metadata_ext", since = "1.1.0")]
++pub trait MetadataExt {
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_dev(&self) -> u64;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_ino(&self) -> u64;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_mode(&self) -> u32;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_nlink(&self) -> u64;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_uid(&self) -> u32;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_gid(&self) -> u32;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_rdev(&self) -> u64;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_size(&self) -> u64;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_atime(&self) -> i64;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_atime_nsec(&self) -> i64;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_mtime(&self) -> i64;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_mtime_nsec(&self) -> i64;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_ctime(&self) -> i64;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_ctime_nsec(&self) -> i64;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_blksize(&self) -> u64;
++    #[stable(feature = "metadata_ext2", since = "1.8.0")]
++    fn st_blocks(&self) -> u64;
++}
++
++#[stable(feature = "metadata_ext", since = "1.1.0")]
++impl MetadataExt for Metadata {
++    fn st_dev(&self) -> u64 {
++        self.as_inner().as_inner().st_dev as u64
++    }
++    fn st_ino(&self) -> u64 {
++        self.as_inner().as_inner().st_ino as u64
++    }
++    fn st_mode(&self) -> u32 {
++        self.as_inner().as_inner().st_mode as u32
++    }
++    fn st_nlink(&self) -> u64 {
++        self.as_inner().as_inner().st_nlink as u64
++    }
++    fn st_uid(&self) -> u32 {
++        self.as_inner().as_inner().st_uid as u32
++    }
++    fn st_gid(&self) -> u32 {
++        self.as_inner().as_inner().st_gid as u32
++    }
++    fn st_rdev(&self) -> u64 {
++        self.as_inner().as_inner().st_rdev as u64
++    }
++    fn st_size(&self) -> u64 {
++        self.as_inner().as_inner().st_size as u64
++    }
++    fn st_atime(&self) -> i64 {
++        self.as_inner().as_inner().st_atim.tv_sec as i64
++    }
++    fn st_atime_nsec(&self) -> i64 {
++        self.as_inner().as_inner().st_atim.tv_nsec as i64
++    }
++    fn st_mtime(&self) -> i64 {
++        self.as_inner().as_inner().st_mtim.tv_sec as i64
++    }
++    fn st_mtime_nsec(&self) -> i64 {
++        self.as_inner().as_inner().st_mtim.tv_nsec as i64
++    }
++    fn st_ctime(&self) -> i64 {
++        self.as_inner().as_inner().st_ctim.tv_sec as i64
++    }
++    fn st_ctime_nsec(&self) -> i64 {
++        self.as_inner().as_inner().st_ctim.tv_nsec as i64
++    }
++    fn st_blksize(&self) -> u64 {
++        self.as_inner().as_inner().st_blksize as u64
++    }
++    fn st_blocks(&self) -> u64 {
++        self.as_inner().as_inner().st_blocks as u64
++    }
++}
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/os/blueos/mod.rs b/std/src/os/blueos/mod.rs
+--- a/std/src/os/blueos/mod.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/std/src/os/blueos/mod.rs	2026-11-26 14:57:35.000000000 +0000
+@@ -0,0 +1,7 @@
++//! Definitions for BlueOS
++
++#![forbid(unsafe_op_in_unsafe_fn)]
++#![stable(feature = "raw_ext", since = "1.1.0")]
++
++pub mod fs;
++pub(crate) mod raw;
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/os/blueos/raw.rs b/std/src/os/blueos/raw.rs
+--- a/std/src/os/blueos/raw.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/std/src/os/blueos/raw.rs	2026-11-26 14:57:35.000000000 +0000
+@@ -0,0 +1,33 @@
++//! BlueOS raw type definitions
++
++#![stable(feature = "raw_ext", since = "1.1.0")]
++#![deprecated(
++    since = "1.8.0",
++    note = "these type aliases are no longer supported by \
++            the standard library, the `libc` crate on \
++            crates.io should be used instead for the correct \
++            definitions"
++)]
++#![allow(deprecated)]
++
++#[stable(feature = "pthread_t", since = "1.8.0")]
++pub type pthread_t = libc::pthread_t;
++
++#[stable(feature = "raw_ext", since = "1.1.0")]
++pub type blkcnt_t = libc::blkcnt_t;
++
++#[stable(feature = "raw_ext", since = "1.1.0")]
++pub type blksize_t = libc::blksize_t;
++#[stable(feature = "raw_ext", since = "1.1.0")]
++pub type dev_t = libc::dev_t;
++#[stable(feature = "raw_ext", since = "1.1.0")]
++pub type ino_t = libc::ino_t;
++#[stable(feature = "raw_ext", since = "1.1.0")]
++pub type mode_t = libc::mode_t;
++#[stable(feature = "raw_ext", since = "1.1.0")]
++pub type nlink_t = libc::nlink_t;
++#[stable(feature = "raw_ext", since = "1.1.0")]
++pub type off_t = libc::off_t;
++
++#[stable(feature = "raw_ext", since = "1.1.0")]
++pub type time_t = libc::time_t;
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/os/fd/owned.rs b/std/src/os/fd/owned.rs
+--- a/std/src/os/fd/owned.rs	2026-11-22 06:04:22.143825000 +0000
++++ b/std/src/os/fd/owned.rs	2026-11-26 15:02:52.403470595 +0000
+@@ -138,14 +138,14 @@
+         // We want to atomically duplicate this file descriptor and set the
+         // CLOEXEC flag, and currently that's done via F_DUPFD_CLOEXEC. This
+         // is a POSIX flag that was added to Linux in 2.6.24.
+-        #[cfg(not(any(target_os = "espidf", target_os = "vita")))]
++        #[cfg(not(any(target_os = "espidf", target_os = "vita", target_os = "blueos")))]
+         let cmd = libc::F_DUPFD_CLOEXEC;
+ 
+         // For ESP-IDF, F_DUPFD is used instead, because the CLOEXEC semantics
+         // will never be supported, as this is a bare metal framework with
+         // no capabilities for multi-process execution. While F_DUPFD is also
+         // not supported yet, it might be (currently it returns ENOSYS).
+-        #[cfg(any(target_os = "espidf", target_os = "vita"))]
++        #[cfg(any(target_os = "espidf", target_os = "vita", target_os = "blueos"))]
+         let cmd = libc::F_DUPFD;
+ 
+         // Avoid using file descriptors below 3 as they are used for stdio
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/os/mod.rs b/std/src/os/mod.rs
+--- a/std/src/os/mod.rs	2026-11-22 06:04:22.177825039 +0000
++++ b/std/src/os/mod.rs	2026-11-26 15:02:52.403470595 +0000
+@@ -87,6 +87,8 @@
+ pub mod aix;
+ #[cfg(target_os = "android")]
+ pub mod android;
++#[cfg(target_os = "blueos")]
++pub mod blueos;
+ #[cfg(target_os = "cygwin")]
+ pub mod cygwin;
+ #[cfg(target_os = "dragonfly")]
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/os/unix/mod.rs b/std/src/os/unix/mod.rs
+--- a/std/src/os/unix/mod.rs	2026-11-22 06:04:22.181825044 +0000
++++ b/std/src/os/unix/mod.rs	2026-11-26 15:02:52.403470595 +0000
+@@ -42,6 +42,8 @@
+     pub use crate::os::aix::*;
+     #[cfg(target_os = "android")]
+     pub use crate::os::android::*;
++    #[cfg(target_os = "blueos")]
++    pub use crate::os::blueos::*;
+     #[cfg(target_os = "cygwin")]
+     pub use crate::os::cygwin::*;
+     #[cfg(target_vendor = "apple")]
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/os/unix/process.rs b/std/src/os/unix/process.rs
+--- a/std/src/os/unix/process.rs	2026-11-22 06:04:22.341825230 +0000
++++ b/std/src/os/unix/process.rs	2026-11-26 15:02:52.403470595 +0000
+@@ -15,7 +15,7 @@
+ use crate::{io, process, sys};
+ 
+ cfg_select! {
+-    any(target_os = "vxworks", target_os = "espidf", target_os = "horizon", target_os = "vita") => {
++    any(target_os = "vxworks", target_os = "espidf", target_os = "horizon", target_os = "vita", target_os = "blueos") => {
+         type UserId = u16;
+         type GroupId = u16;
+     }
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/sys/alloc/unix.rs b/std/src/sys/alloc/unix.rs
+--- a/std/src/sys/alloc/unix.rs	2026-11-22 06:04:22.374825268 +0000
++++ b/std/src/sys/alloc/unix.rs	2026-11-26 15:02:52.403470595 +0000
+@@ -77,7 +77,7 @@
+ cfg_select! {
+     // We use posix_memalign wherever possible, but some targets have very incomplete POSIX coverage
+     // so we need a fallback for those.
+-    any(target_os = "horizon", target_os = "vita") => {
++    any(target_os = "horizon", target_os = "vita", target_os = "blueos") => {
+         #[inline]
+         unsafe fn aligned_malloc(layout: &Layout) -> *mut u8 {
+             unsafe { libc::memalign(layout.align(), layout.size()) as *mut u8 }
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/sys/args/mod.rs b/std/src/sys/args/mod.rs
+--- a/std/src/sys/args/mod.rs	2026-11-22 06:04:22.177825039 +0000
++++ b/std/src/sys/args/mod.rs	2026-11-26 15:03:28.570768760 +0000
+@@ -3,7 +3,10 @@
+ #![forbid(unsafe_op_in_unsafe_fn)]
+ 
+ #[cfg(any(
+-    all(target_family = "unix", not(any(target_os = "espidf", target_os = "vita"))),
++    all(
++        target_family = "unix",
++        not(any(target_os = "espidf", target_os = "vita", target_os = "blueos"))
++    ),
+     target_family = "windows",
+     target_os = "hermit",
+     target_os = "motor",
+@@ -20,7 +23,8 @@
+             not(any(
+                 all(target_family = "wasm", target_os = "linux"),
+                 target_os = "espidf",
+-                target_os = "vita"
++                target_os = "vita",
++                target_os = "blueos"
+             ))
+         ),
+         target_os = "hermit",
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/sys/env_consts.rs b/std/src/sys/env_consts.rs
+--- a/std/src/sys/env_consts.rs	2026-11-22 06:04:22.354825245 +0000
++++ b/std/src/sys/env_consts.rs	2026-11-26 15:02:52.403470595 +0000
+@@ -37,6 +37,17 @@
+     pub const EXE_EXTENSION: &str = "";
+ }
+ 
++#[cfg(target_os = "blueos")]
++pub mod os {
++    pub const FAMILY: &str = "unix";
++    pub const OS: &str = "blueos";
++    pub const DLL_PREFIX: &str = "lib";
++    pub const DLL_SUFFIX: &str = ".so";
++    pub const DLL_EXTENSION: &str = "so";
++    pub const EXE_SUFFIX: &str = "";
++    pub const EXE_EXTENSION: &str = "";
++}
++
+ #[cfg(target_os = "cygwin")]
+ pub mod os {
+     pub const FAMILY: &str = "unix";
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/sys/fd/unix.rs b/std/src/sys/fd/unix.rs
+--- a/std/src/sys/fd/unix.rs	2026-11-22 06:04:22.375825269 +0000
++++ b/std/src/sys/fd/unix.rs	2026-11-26 15:02:53.449657169 +0000
+@@ -112,6 +112,7 @@
+     target_os = "openbsd",
+     target_os = "horizon",
+     target_os = "vita",
++    target_os = "blueos",
+     target_vendor = "apple",
+     target_os = "cygwin",
+ )))]
+@@ -140,6 +141,7 @@
+         target_os = "espidf",
+         target_os = "horizon",
+         target_os = "vita",
++        target_os = "blueos",
+         target_os = "nuttx"
+     )))]
+     pub fn read_vectored(&self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
+@@ -157,6 +159,7 @@
+         target_os = "espidf",
+         target_os = "horizon",
+         target_os = "vita",
++        target_os = "blueos",
+         target_os = "nuttx"
+     ))]
+     pub fn read_vectored(&self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
+@@ -171,6 +174,7 @@
+             target_os = "vita",
+             target_os = "nuttx",
+             target_os = "wasi",
++            target_os = "blueos"
+         )))
+     }
+ 
+@@ -378,6 +382,7 @@
+         target_os = "espidf",
+         target_os = "horizon",
+         target_os = "vita",
++        target_os = "blueos",
+         target_os = "nuttx"
+     )))]
+     pub fn write_vectored(&self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
+@@ -395,6 +400,7 @@
+         target_os = "espidf",
+         target_os = "horizon",
+         target_os = "vita",
++        target_os = "blueos",
+         target_os = "nuttx"
+     ))]
+     pub fn write_vectored(&self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
+@@ -409,6 +415,7 @@
+             target_os = "vita",
+             target_os = "nuttx",
+             target_os = "wasi",
++            target_os = "blueos",
+         )))
+     }
+ 
+@@ -584,7 +591,12 @@
+     #[cfg(any(
+         all(
+             target_env = "newlib",
+-            not(any(target_os = "espidf", target_os = "horizon", target_os = "vita"))
++            not(any(
++                target_os = "espidf",
++                target_os = "horizon",
++                target_os = "vita",
++                target_os = "blueos",
++            ))
+         ),
+         target_os = "solaris",
+         target_os = "illumos",
+@@ -610,7 +622,12 @@
+             Ok(())
+         }
+     }
+-    #[cfg(any(target_os = "espidf", target_os = "horizon", target_os = "vita"))]
++    #[cfg(any(
++        target_os = "espidf",
++        target_os = "horizon",
++        target_os = "vita",
++        target_os = "blueos",
++    ))]
+     pub fn set_cloexec(&self) -> io::Result<()> {
+         // FD_CLOEXEC is not supported in ESP-IDF, Horizon OS and Vita but there's no need to,
+         // because none of them supports spawning processes.
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/sys/fs/unix.rs b/std/src/sys/fs/unix.rs
+--- a/std/src/sys/fs/unix.rs	2026-11-22 06:04:22.375825269 +0000
++++ b/std/src/sys/fs/unix.rs	2026-11-26 15:07:37.896064040 +0000
+@@ -270,6 +270,7 @@
+         target_os = "espidf",
+         target_os = "horizon",
+         target_os = "vita",
++        target_os = "blueos",
+         target_os = "nto",
+         target_os = "qnx",
+         target_os = "vxworks",
+@@ -415,6 +416,7 @@
+         target_os = "nto",
+         target_os = "qnx",
+         target_os = "vita",
++        target_os = "blueos",
+     )))]
+     d_type: u8,
+ }
+@@ -571,6 +573,7 @@
+         target_os = "espidf",
+         target_os = "horizon",
+         target_os = "vita",
++        target_os = "blueos",
+         target_os = "hurd",
+         target_os = "rtems",
+         target_os = "nuttx",
+@@ -600,7 +603,8 @@
+         target_os = "hurd",
+         target_os = "nuttx",
+         target_os = "rtems",
+-        all(target_os = "vxworks", not(vxworks_lt_25_09))
++        all(target_os = "vxworks", not(vxworks_lt_25_09)),
++        target_os = "blueos",
+     ))]
+     pub fn modified(&self) -> io::Result<SystemTime> {
+         SystemTime::new(self.stat.st_mtim.tv_sec as i64, self.stat.st_mtim.tv_nsec as i64)
+@@ -611,6 +615,7 @@
+         target_os = "espidf",
+         target_os = "horizon",
+         target_os = "vita",
++        target_os = "blueos",
+         target_os = "hurd",
+         target_os = "rtems",
+         target_os = "nuttx",
+@@ -640,7 +645,8 @@
+         target_os = "hurd",
+         target_os = "nuttx",
+         target_os = "rtems",
+-        all(target_os = "vxworks", not(vxworks_lt_25_09))
++        all(target_os = "vxworks", not(vxworks_lt_25_09)),
++        target_os = "blueos",
+     ))]
+     pub fn accessed(&self) -> io::Result<SystemTime> {
+         SystemTime::new(self.stat.st_atim.tv_sec as i64, self.stat.st_atim.tv_nsec as i64)
+@@ -660,6 +666,7 @@
+         target_os = "freebsd",
+         target_os = "openbsd",
+         target_os = "vita",
++        target_os = "blueos",
+         target_vendor = "apple",
+         target_os = "cygwin",
+     )))]
+@@ -687,6 +694,11 @@
+     pub fn created(&self) -> io::Result<SystemTime> {
+         SystemTime::new(self.stat.st_ctime as i64, 0)
+     }
++
++    #[cfg(target_os = "blueos")]
++    pub fn created(&self) -> io::Result<SystemTime> {
++        SystemTime::new(self.stat.st_ctim.tv_sec as i64, self.stat.st_ctim.tv_nsec as i64)
++    }
+ }
+ 
+ #[cfg(any(target_os = "nto", target_os = "qnx", target_os = "wasi", target_os = "l4re"))]
+@@ -799,6 +811,7 @@
+                 target_os = "espidf",
+                 target_os = "horizon",
+                 target_os = "vita",
++                target_os = "blueos",
+                 target_os = "nto",
+                 target_os = "qnx",
+                 target_os = "vxworks",
+@@ -973,6 +986,7 @@
+                         target_os = "nto",
+                         target_os = "qnx",
+                         target_os = "vita",
++                        target_os = "blueos",
+                     )))]
+                     d_type: (*entry_ptr).d_type as u8,
+                 };
+@@ -1015,6 +1029,7 @@
+             target_os = "nto",
+             target_os = "qnx",
+             target_os = "vita",
++            target_os = "blueos",
+             target_os = "espidf",
+             target_os = "horizon",
+             target_os = "vxworks",
+@@ -1055,6 +1070,7 @@
+                 target_os = "nto",
+                 target_os = "qnx",
+                 target_os = "vita",
++                target_os = "blueos",
+                 target_os = "espidf",
+                 target_os = "horizon",
+                 target_os = "vxworks",
+@@ -1087,6 +1103,7 @@
+             target_os = "nto",
+             target_os = "qnx",
+             target_os = "vita",
++            target_os = "blueos",
+         )))]
+         match self.entry.d_type {
+             libc::DT_CHR => return Ok(FileType { mode: libc::S_IFCHR }),
+@@ -2083,6 +2100,7 @@
+             // Other misc platforms
+             target_os = "horizon",
+             target_os = "vita",
++            target_os = "blueos",
+             target_os = "l4re",
+             target_env = "nto70",
+         ) => {
+@@ -2170,6 +2188,7 @@
+             target_os = "horizon",
+             target_os = "nuttx",
+             target_os = "vita",
++            target_os = "blueos",
+             target_os = "rtems"
+         ) => {
+             let _ = (p, times, follow_symlinks);
+@@ -2480,6 +2499,7 @@
+     target_os = "espidf",
+     target_os = "horizon",
+     target_os = "vita",
++    target_os = "blueos",
+     target_os = "nto",
+     target_os = "qnx",
+     target_os = "vxworks",
+@@ -2496,6 +2516,7 @@
+     target_os = "espidf",
+     target_os = "horizon",
+     target_os = "vita",
++    target_os = "blueos",
+     target_os = "nto",
+     target_os = "qnx",
+     target_os = "vxworks",
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/sys/pal/unix/mod.rs b/std/src/sys/pal/unix/mod.rs
+--- a/std/src/sys/pal/unix/mod.rs	2026-11-22 06:04:22.181825044 +0000
++++ b/std/src/sys/pal/unix/mod.rs	2026-11-26 15:03:28.929829775 +0000
+@@ -36,7 +36,7 @@
+     reset_sigpipe(sigpipe);
+ 
+     stack_overflow::init();
+-    #[cfg(not(target_os = "vita"))]
++    #[cfg(not(any(target_os = "vita", target_os = "blueos")))]
+     crate::sys::args::init(argc, argv);
+ 
+     // Normally, `thread::spawn` will call `Thread::set_name` but since this thread
+@@ -85,6 +85,7 @@
+             target_os = "rtems",
+             // The poll on Darwin doesn't set POLLNVAL for closed fds when `events == 0`.
+             target_vendor = "apple",
++            target_os = "blueos",
+         )))]
+         'poll: {
+             use crate::sys::io::errno;
+@@ -130,6 +131,7 @@
+             target_os = "l4re",
+             target_os = "horizon",
+             target_os = "vita",
++            target_os = "blueos",
+         )))]
+         {
+             use crate::sys::io::errno;
+@@ -152,6 +154,7 @@
+             // Unikraft's `signal` implementation is currently broken:
+             // https://github.com/unikraft/lib-musl/issues/57
+             target_vendor = "unikraft",
++            target_os = "blueos",
+         )))]
+         {
+             // We don't want to add this as a public type to std, nor do we
+@@ -196,6 +199,7 @@
+     target_os = "horizon",
+     target_os = "vxworks",
+     target_os = "vita",
++    target_os = "blueos",
+     target_os = "l4re",
+ )))]
+ static ON_BROKEN_PIPE_USED: crate::sync::atomic::Atomic<bool> =
+@@ -208,6 +212,7 @@
+     target_os = "horizon",
+     target_os = "vxworks",
+     target_os = "vita",
++    target_os = "blueos",
+     target_os = "nuttx",
+     target_os = "l4re",
+ )))]
+@@ -379,6 +384,7 @@
+     target_os = "vita",
+     target_os = "nuttx",
+     target_os = "l4re",
++    target_os = "blueos",
+ ))]
+ pub fn unsupported<T>() -> crate::io::Result<T> {
+     Err(unsupported_err())
+@@ -390,6 +396,7 @@
+     target_os = "vita",
+     target_os = "nuttx",
+     target_os = "l4re",
++    target_os = "blueos",
+ ))]
+ pub fn unsupported_err() -> crate::io::Error {
+     io::Error::UNSUPPORTED_PLATFORM
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/sys/pal/unix/sync/condvar.rs b/std/src/sys/pal/unix/sync/condvar.rs
+--- a/std/src/sys/pal/unix/sync/condvar.rs	2026-11-22 06:04:22.273825151 +0000
++++ b/std/src/sys/pal/unix/sync/condvar.rs	2026-11-26 15:02:53.450657347 +0000
+@@ -143,6 +143,7 @@
+     target_os = "l4re",
+     target_os = "redox",
+     target_os = "teeos",
++    target_os = "blueos",
+ )))]
+ impl Condvar {
+     pub const PRECISE_TIMEOUT: bool = true;
+@@ -200,6 +201,7 @@
+     target_os = "l4re",
+     target_os = "redox",
+     target_os = "teeos",
++    target_os = "blueos",
+ ))]
+ impl Condvar {
+     pub const PRECISE_TIMEOUT: bool = false;
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/sys/paths/unix.rs b/std/src/sys/paths/unix.rs
+--- a/std/src/sys/paths/unix.rs	2026-11-22 06:04:22.375825269 +0000
++++ b/std/src/sys/paths/unix.rs	2026-11-26 15:02:53.450657347 +0000
+@@ -382,7 +382,7 @@
+     path.canonicalize()
+ }
+ 
+-#[cfg(any(target_os = "espidf", target_os = "horizon", target_os = "vita"))]
++#[cfg(any(target_os = "espidf", target_os = "horizon", target_os = "vita", target_os = "blueos"))]
+ pub fn current_exe() -> io::Result<PathBuf> {
+     crate::sys::pal::unsupported()
+ }
+@@ -442,6 +442,7 @@
+         target_os = "vita",
+         target_os = "nuttx",
+         all(target_vendor = "apple", not(target_os = "macos")),
++        target_os = "blueos",
+     ))]
+     unsafe fn fallback() -> Option<OsString> {
+         None
+@@ -456,6 +457,7 @@
+         target_os = "vita",
+         target_os = "nuttx",
+         all(target_vendor = "apple", not(target_os = "macos")),
++        target_os = "blueos",
+     )))]
+     unsafe fn fallback() -> Option<OsString> {
+         let amt = match libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX) {
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/sys/process/unix/mod.rs b/std/src/sys/process/unix/mod.rs
+--- a/std/src/sys/process/unix/mod.rs	2026-11-22 06:04:22.181825044 +0000
++++ b/std/src/sys/process/unix/mod.rs	2026-11-26 15:03:31.589280609 +0000
+@@ -1,5 +1,11 @@
+ #[cfg_attr(
+-    any(target_os = "espidf", target_os = "horizon", target_os = "nuttx", target_os = "l4re"),
++    any(
++        target_os = "espidf",
++        target_os = "horizon",
++        target_os = "nuttx",
++        target_os = "l4re",
++        target_os = "blueos"
++    ),
+     allow(unused)
+ )]
+ mod common;
+@@ -18,7 +24,8 @@
+         target_os = "horizon",
+         target_os = "vita",
+         target_os = "nuttx",
+-        target_os = "l4re"
++        target_os = "l4re",
++        target_os = "blueos"
+     ) => {
+         mod unsupported;
+         use unsupported as imp;
+diff -ruN '--exclude=target' '--exclude=Cargo.toml.orig' '--exclude=vivo-std.patch' '--exclude=*.rej' '--exclude=*.orig' a/std/src/sys/random/mod.rs b/std/src/sys/random/mod.rs
+--- a/std/src/sys/random/mod.rs	2026-11-22 06:04:22.171825032 +0000
++++ b/std/src/sys/random/mod.rs	2026-11-26 15:07:38.305115101 +0000
+@@ -49,7 +49,7 @@
+         mod getrandom;
+         pub use getrandom::fill_bytes;
+     }
+-    any(target_os = "aix", target_os = "hurd", target_os = "nto", target_os = "qnx") => {
++    any(target_os = "aix", target_os = "hurd", target_os = "nto", target_os = "qnx", target_os = "blueos") => {
+         mod unix_legacy;
+         pub use unix_legacy::fill_bytes;
+     }

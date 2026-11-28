@@ -35,3 +35,7 @@
 [submodule "Redox"]
 	path = Redox
 	url = https://github.com/KMiri-rs/Redox.git
+[submodule "blueos/kernel"]
+	path = blueos/kernel
+	url = https://github.com/KMiri-rs/vivoblueos-kernel.git
+	branch = kmiri-mono
