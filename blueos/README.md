@@ -45,6 +45,33 @@ BlueOS fixes that the board branch carries (upstream PRs
 [#594](https://github.com/vivoblueos/kernel/pull/594)); without them KMiri
 stops at the first one (two data races and a failing test).
 
+## One test at a time
+
+KMiri stops at the first undefined behavior or unsupported operation, so a run
+of all tests ends at the first such test and hides the ones after it. The
+kernel can run a single test instead: it reads a libtest-style selection from
+the semihosting command line, which `BLUEOS_MIRI_TEST_FILTER` sets (e.g.
+`BLUEOS_MIRI_TEST_FILTER="--exact tests::stress_trap" ./run.sh test`).
+
+```sh
+./run.sh list            # the test names
+./run.sh sweep 1800 6    # each test alone, at most 1800 s each, 6 at a time
+```
+
+`sweep` writes one line per test, `name  outcome  seconds`, to
+`work/sweep/results.tsv` and its log to `work/sweep/logs/`. The outcome is the
+first that applies of `ub`, `unsupported` (an operation KMiri cannot
+interpret), `timeout`, `failed` (the test panicked), `ignored`, `ok` and
+`other`.
+
+Expected now (about 15 minutes on 32 cores): 240 tests, 235 `ok`, 1
+`unsupported` (`tests::stress_trap`, see above) and 4 `ub`:
+`vfs::dirent::tests::test_dirent`, `vfs::dirent::tests::test_dirent_long_name`,
+`vfs::syscalls::tests::test_getdents_current_dir` and
+`vfs::syscalls::tests::test_getdents_parent_dir` make a `&Dirent` from a byte
+array that is only 1-aligned. On 1 core (`CONFIG_SMP` off, no `[smp]`) there
+is one more test, `time::timer::tests::test_timer_edge_cases`, which passes.
+
 ## Differences from native `qemu_riscv64`
 
 Listed in the descriptions of the board
