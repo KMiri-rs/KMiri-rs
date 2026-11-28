@@ -1,7 +1,7 @@
 # BlueOS under KMiri
 
 Runs the unit tests of the [vivo BlueOS](https://github.com/vivoblueos/kernel)
-kernel (riscv64, `qemu_riscv64` debug configuration) in the KMiri interpreter,
+kernel (riscv64, `qemu_riscv64` debug or release configuration) in the KMiri interpreter,
 so that undefined behavior in kernel code is reported where it happens.
 
 - `kernel/`: submodule, the BlueOS kernel with the `kmiri` board
@@ -71,6 +71,35 @@ Expected now (about 15 minutes on 32 cores): 240 tests, 235 `ok`, 1
 `vfs::syscalls::tests::test_getdents_parent_dir` make a `&Dirent` from a byte
 array that is only 1-aligned. On 1 core (`CONFIG_SMP` off, no `[smp]`) there
 is one more test, `time::timer::tests::test_timer_edge_cases`, which passes.
+
+## Release build
+
+`BLUEOS_BUILD_TYPE=release` selects the kernel's release build type for all
+commands (`kernel/kconfig/config/kmiri/release`, the `qemu_riscv64` release
+configuration on 2 cores; output in `kernel/out/kmiri.release.dsc`):
+
+```sh
+BLUEOS_BUILD_TYPE=release ./run.sh build
+BLUEOS_BUILD_TYPE=release ./run.sh sweep 1800 6
+```
+
+As in the native release build, debug assertions, overflow checks and
+`ub_checks` are off and code under `cfg(debug_assertions)` is left out (BlueOS
+then uses half the thread stack sizes and smaller stress tests). GN's Miri mode
+appends `-Copt-level=0`, which would turn debug assertions on; the kernel's
+`build/scripts/kmiri/kmiri_rustc.py` turns them off again. `sweep` writes to
+the same `work/sweep` for both build types.
+
+Expected now: 239 tests (`vfs::procfs::stat::tests::test_running_idle_cycles`
+needs `CONFIG_THREAD_STATS`, which release leaves off), 230 `ok`, the same 4
+`ub` and 1 `unsupported` as in debug, and 4 `other`:
+`allocator::tests::coalescing_test` and the buddy tests
+`wrapper_reads_and_writes_real_backing_pages`,
+`wrapper_translates_addresses_and_handles_overflow` and
+`shared_local_heap_serializes_concurrent_operations` run out of thread stack
+(`resource exhaustion: there are no more free addresses in the address
+space`). KMiri interprets unoptimized MIR, where every local and temporary has
+its own stack slot; natively all four pass.
 
 ## Differences from native `qemu_riscv64`
 

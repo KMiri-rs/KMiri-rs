@@ -12,6 +12,7 @@
 #                         3000); results in $BLUEOS_WORK/sweep
 #
 # Environment: BLUEOS_KERNEL (default: ./kernel), BLUEOS_WORK (default: ./work),
+# BLUEOS_BUILD_TYPE (the kernel's build type, debug or release; default: debug),
 # KMIRI_FLAGS (Miri flags, default when unset: -Zmiri-disable-stacked-borrows),
 # BLUEOS_MIRI_TEST_FILTER (tests `test` runs, in libtest form: name filters,
 # --exact; default: all).
@@ -21,7 +22,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 KERNEL=${BLUEOS_KERNEL:-$HERE/kernel}
 WORK=${BLUEOS_WORK:-$HERE/work}
 export RUSTUP_TOOLCHAIN=nightly-2026-11-16
-OUT=$KERNEL/out/kmiri.debug.dsc
+BUILD_TYPE=${BLUEOS_BUILD_TYPE:-debug}
+OUT=$KERNEL/out/kmiri.$BUILD_TYPE.dsc
 SYSROOT=$WORK/miri-sysroot
 LIB=$WORK/rust-lib
 TARGET=$KERNEL/build/scripts/kmiri/riscv64-vivo-blueos.json
@@ -49,7 +51,7 @@ setup() {
 }
 
 build() {
-    (cd "$KERNEL" && gn gen "$OUT" --args="board=\"kmiri\" build_type=\"debug\" syscall_mode=\"dsc\" miri_sysroot=\"$SYSROOT\"")
+    (cd "$KERNEL" && gn gen "$OUT" --args="board=\"kmiri\" build_type=\"$BUILD_TYPE\" syscall_mode=\"dsc\" miri_sysroot=\"$SYSROOT\"")
     # Everything the unit-test kernel needs; building that target itself
     # would interpret it.
     local deps
@@ -185,7 +187,7 @@ list) list ;;
 sweep) sweep "${2:-}" "${3:-}" ;;
 sweep-one) sweep_one "$2" "$3" ;;
 *)
-    sed -n '2,19p' "$0" | sed '/^set /d'
+    sed -n '2,20p' "$0" | sed '/^set /d'
     exit 2
     ;;
 esac
