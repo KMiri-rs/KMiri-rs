@@ -38,13 +38,19 @@ cd blueos
 
 Expected now: 169 tests pass and no undefined behavior is reported; the run
 then stops at `stress_trap`, whose `ecall` in inline assembly KMiri cannot
-interpret, so the tests after it are not reached.
+interpret, so the tests after it are not reached. On 2 cores this needs three
+BlueOS fixes that the board branch carries (upstream PRs
+[vivoblueos/kernel#592](https://github.com/vivoblueos/kernel/pull/592),
+[#593](https://github.com/vivoblueos/kernel/pull/593),
+[#594](https://github.com/vivoblueos/kernel/pull/594)); without them KMiri
+stops at the first one (two data races and a failing test).
 
 ## Differences from native `qemu_riscv64`
 
 Listed in the descriptions of the board
 ([KMiri-rs/vivoblueos-kernel#25](https://github.com/KMiri-rs/vivoblueos-kernel/pull/25),
-[#26](https://github.com/KMiri-rs/vivoblueos-kernel/pull/26)): one core
-instead of SMP; clock and software interrupts come from KMiri's CLINT model,
+[#26](https://github.com/KMiri-rs/vivoblueos-kernel/pull/26),
+[#27](https://github.com/KMiri-rs/vivoblueos-kernel/pull/27)): 2 cores
+instead of 32; clock and software interrupts come from KMiri's CLINT model,
 which has no `mie` register and resets `mtimecmp` to the maximum.
 Stacked Borrows is off by default (`KMIRI_FLAGS`).
